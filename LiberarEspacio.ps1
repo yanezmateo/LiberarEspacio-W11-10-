@@ -106,7 +106,8 @@ function Limpiar-Perfiles {
 
     if ($userList.Count -eq 0) {
         Write-Host "No se encontraron perfiles inactivos para eliminar." -ForegroundColor Yellow
-        return
+        Read-Host "`nPresione Enter para continuar"
+        return $false
     }
 
     $formatString = "{0,-5} | {1,-20} | {2,-10} | {3,-16} | {4,-25}"
@@ -127,7 +128,7 @@ function Limpiar-Perfiles {
     while (-not $validSelection) {
         $selection = Read-Host "`nIndique su opcion (Numeros, 'T' o 'S')"
         if ([string]::IsNullOrWhiteSpace($selection)) { continue }
-        if ($selection -match '(?i)^s$') { Write-Host "Operacion cancelada."; return }
+        if ($selection -match '(?i)^s$') { return $false }
 
         $profilesToDelete = @()
 
@@ -195,8 +196,10 @@ function Limpiar-Perfiles {
             }
             Write-Progress -Activity "Eliminando perfiles" -Completed
             Write-Host "Limpieza de perfiles finalizada." -ForegroundColor Green
-        } else { Write-Host "Operacion cancelada." -ForegroundColor Yellow }
+            return $true
+        } else { return $false }
     }
+    return $false
 }
 
 function Ejecutar-Cleanmgr {
@@ -398,9 +401,20 @@ function Vaciar-Papeleras {
     Remove-Item -Path "C:\`$Recycle.Bin\*" -Recurse -Force -ErrorAction SilentlyContinue
     Clear-RecycleBin -Force -ErrorAction SilentlyContinue
     
-    Write-Host "Borrando temporales locales..."
-    Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "Borrando temporales de sistema y de todos los usuarios..."
+    $tempPaths = @(
+        "C:\Windows\Temp\*",
+        "C:\Users\*\AppData\Local\Temp\*"
+    )
+    foreach ($ruta in $tempPaths) {
+        Get-ChildItem -Path $ruta -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction Stop
+            } catch {
+                # Ignorar archivos en uso
+            }
+        }
+    }
     
     Write-Host "Limpiando cache de descargas trabadas de Windows Update..."
     Stop-Service -Name "wuauserv" -Force -ErrorAction SilentlyContinue
@@ -416,22 +430,33 @@ while ($true) {
     $espacioLibreBytes = Get-CFreeSpaceBytes
     $espacioLibreStr = Format-Bytes $espacioLibreBytes
 
-    Write-Host "=========================================================" -ForegroundColor Cyan
-    Write-Host "   MENU PRINCIPAL - LIBERACION DE ESPACIO EN DISCO       " -ForegroundColor Cyan
-    Write-Host "=========================================================" -ForegroundColor Cyan
-    Write-Host "   Espacio libre actual en C:\ -> " -NoNewline
+    Write-Host "`n=========================================================" -ForegroundColor DarkCyan
+    Write-Host "      MANTENIMIENTO Y LIBERACION DE ESPACIO EN C:\       " -ForegroundColor Cyan
+    Write-Host "=========================================================" -ForegroundColor DarkCyan
+    Write-Host "   Espacio libre actual -> " -ForegroundColor Gray -NoNewline
     Write-Host "$espacioLibreStr" -ForegroundColor Green
-    Write-Host "=========================================================`n" -ForegroundColor Cyan
+    Write-Host "=========================================================`n" -ForegroundColor DarkCyan
     
-    Write-Host "[1] Eliminar Perfiles de Usuario"
-    Write-Host "[2] Ejecutar Limpiador de Windows (Cleanmgr - Todo seleccionado)"
-    Write-Host "[3] Explorador Interactivo de carpetas pesadas"
-    Write-Host "[4] Vaciado Rapido (Papelera de reciclaje GLOBAL y Temp)"
-    Write-Host "[S] Salir"
+    Write-Host "  [ 1 ] " -ForegroundColor Cyan -NoNewline
+    Write-Host "Eliminar Perfiles de Usuario" -ForegroundColor White
     
-    Write-Host "`nSeleccione una opcion: " -NoNewline
-    $opcion = [System.Console]::ReadKey($true).KeyChar
-    Write-Host $opcion
+    Write-Host "`n  [ 2 ] " -ForegroundColor Cyan -NoNewline
+    Write-Host "Ejecutar Limpiador de Windows" -ForegroundColor White
+    Write-Host "        (Cleanmgr automatizado - Todo seleccionado)" -ForegroundColor DarkGray
+
+    Write-Host "`n  [ 3 ] " -ForegroundColor Cyan -NoNewline
+    Write-Host "Explorador Interactivo de Espacio" -ForegroundColor White
+    Write-Host "        (Navega y encuentra archivos/carpetas pesadas)" -ForegroundColor DarkGray
+
+    Write-Host "`n  [ 4 ] " -ForegroundColor Cyan -NoNewline
+    Write-Host "Vaciado Rapido" -ForegroundColor White
+    Write-Host "        (Papelera de reciclaje y Temps GLOBALES)" -ForegroundColor DarkGray
+
+    Write-Host "`n  [ S ] " -ForegroundColor Red -NoNewline
+    Write-Host "Salir" -ForegroundColor Gray
+    Write-Host "`n=========================================================" -ForegroundColor DarkCyan
+    
+    $opcion = Read-Host "`n  Seleccione una opcion"
     
     if ([string]::IsNullOrWhiteSpace($opcion)) { continue }
     
@@ -441,7 +466,11 @@ while ($true) {
     $pausar = $false
 
     switch -Regex ($opcion) {
-        '^1$' { Limpiar-Perfiles; $accionRealizada = $true; $pausar = $true }
+        '^1$' { 
+            $res = Limpiar-Perfiles
+            $accionRealizada = $res
+            $pausar = $res
+        }
         '^2$' { Ejecutar-Cleanmgr; $accionRealizada = $true; $pausar = $true }
         '^3$' { Analizar-CarpetasPesadas; $pausar = $false } # No pausar al volver del explorador
         '^4$' { Vaciar-Papeleras; $accionRealizada = $true; $pausar = $true }
@@ -463,7 +492,7 @@ while ($true) {
             Write-Host "$(Format-Bytes $liberado)" -ForegroundColor Magenta -NoNewline
             Write-Host " de espacio en tu disco C:\ en esta accion." -ForegroundColor Green
         } elseif ($liberado -lt 0) {
-            Write-Host "`n[-] El sistema ocupo mas espacio de fondo durante el proceso (no se aprecian ganancias netas)." -ForegroundColor DarkGray
+            Write-Host "`n[-] No se aprecia liberacion significante." -ForegroundColor DarkGray
         } else {
             Write-Host "`n[=] No se pudo liberar espacio (archivos en uso o ya estaba todo limpio)." -ForegroundColor DarkGray
         }

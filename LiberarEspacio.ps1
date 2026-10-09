@@ -236,7 +236,7 @@ function Analizar-CarpetasPesadas {
 
         if ($currentPath -eq "ESTE EQUIPO") {
             Write-Host "`n[Ubicacion actual: MIS DISCOS]" -ForegroundColor Magenta
-            $discos = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"
+            $discos = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3")
             foreach ($disco in $discos) {
                 $label = if ($disco.DeviceID -eq "C:") { "(Sistema)" } else { "(Datos)" }
                 $usadoMB = [math]::Round(($disco.Size - $disco.FreeSpace) / 1MB, 2)
@@ -258,7 +258,9 @@ function Analizar-CarpetasPesadas {
             $folders += Get-ChildItem -Path "C:\Users" -Directory -Force -ErrorAction SilentlyContinue | Where-Object {
                 $_.Attributes -notmatch "ReparsePoint"
             }
-            $files = Get-ChildItem -Path "C:\" -File -Force -ErrorAction SilentlyContinue
+            $files = Get-ChildItem -Path "C:\" -File -Force -ErrorAction SilentlyContinue | Where-Object {
+                $_.Name -notmatch '(?i)^(hiberfil\.sys|pagefile\.sys|swapfile\.sys|dumpstack\.log.*)$'
+            }
         } else {
             Write-Host "`n[Ubicacion actual: $currentPath]" -ForegroundColor Magenta
             $folders = Get-ChildItem -Path $currentPath -Directory -Force -ErrorAction SilentlyContinue | Where-Object {
@@ -328,9 +330,9 @@ function Analizar-CarpetasPesadas {
                 if ($f.Nombre -match "^\[DISCO\]") {
                     $color = if ($rowColorToggle) { "Green" } else { "DarkGreen" }
                 } elseif ($f.EsCarpeta) {
-                    $color = if ($rowColorToggle) { "White" } else { "Gray" }
+                    $color = if ($rowColorToggle) { "White" } else { "DarkGray" }
                 } else {
-                    $color = if ($rowColorToggle) { "Cyan" } else { "DarkCyan" }
+                    $color = if ($rowColorToggle) { "Yellow" } else { "DarkYellow" }
                 }
                 Write-Host ($formatString -f "[$($f.Id)]", $f.Nombre, $f.Tamano) -ForegroundColor $color
                 $rowColorToggle = -not $rowColorToggle
@@ -461,7 +463,7 @@ function Vaciar-Papeleras {
 # Bucle del Menu Principal
 while ($true) {
     Clear-Host
-    $discos = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"
+    $discos = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3")
 
     Write-Host "`n=========================================================" -ForegroundColor DarkCyan
     Write-Host "         MANTENIMIENTO Y LIBERACION DE ESPACIO           " -ForegroundColor Cyan

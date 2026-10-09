@@ -222,7 +222,7 @@ function Ejecutar-Cleanmgr {
 }
 
 function Analizar-CarpetasPesadas {
-    $currentPath = "RAIZ"
+    $currentPath = "ESTE EQUIPO"
     
     while ($true) {
         Clear-Host
@@ -230,16 +230,35 @@ function Analizar-CarpetasPesadas {
         Write-Host "Navega por las carpetas para encontrar exactamente que elementos estan ocupando espacio." -ForegroundColor Yellow
         
         $files = @()
-        if ($currentPath -eq "RAIZ") {
+        $folders = @()
+        $folderStats = @()
+        $total = 0
+
+        if ($currentPath -eq "ESTE EQUIPO") {
+            Write-Host "`n[Ubicacion actual: MIS DISCOS]" -ForegroundColor Magenta
+            $discos = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"
+            foreach ($disco in $discos) {
+                $label = if ($disco.DeviceID -eq "C:") { "(Sistema)" } else { "(Datos)" }
+                $usadoMB = [math]::Round(($disco.Size - $disco.FreeSpace) / 1MB, 2)
+                $folderStats += [PSCustomObject]@{
+                    Id = 0
+                    Ruta = "$($disco.DeviceID)\"
+                    Nombre = "[DISCO] $($disco.DeviceID)\ $label"
+                    Tamano = if ($usadoMB -ge 1024) { "$([math]::Round($usadoMB / 1024, 2)) GB" } else { "$([math]::Round($usadoMB, 2)) MB" }
+                    TamanoNum = $usadoMB
+                    EsCarpeta = $true
+                }
+            }
+        } elseif ($currentPath -eq "C:\") {
             Write-Host "`n[Ubicacion actual: RAIZ DE C:\ Y USUARIOS]" -ForegroundColor Magenta
-            $folders = @()
-            # Omitimos carpetas del sistema intocables y ReparsePoints (como Documents and Settings que causan duplicados)
+            # Omitimos carpetas del sistema intocables y ReparsePoints
             $folders += Get-ChildItem -Path "C:\" -Directory -Force -ErrorAction SilentlyContinue | Where-Object {
                 $_.Attributes -notmatch "ReparsePoint" -and $_.Name -notmatch '(?i)^(Windows|Archivos de programa|Program Files.*|Users)$'
             }
             $folders += Get-ChildItem -Path "C:\Users" -Directory -Force -ErrorAction SilentlyContinue | Where-Object {
                 $_.Attributes -notmatch "ReparsePoint"
             }
+            $files = Get-ChildItem -Path "C:\" -File -Force -ErrorAction SilentlyContinue
         } else {
             Write-Host "`n[Ubicacion actual: $currentPath]" -ForegroundColor Magenta
             $folders = Get-ChildItem -Path $currentPath -Directory -Force -ErrorAction SilentlyContinue | Where-Object {
@@ -248,7 +267,6 @@ function Analizar-CarpetasPesadas {
             $files = Get-ChildItem -Path $currentPath -File -Force -ErrorAction SilentlyContinue
         }
 
-        $folderStats = @()
         $total = $folders.Count
         $counter = 1
 
@@ -258,7 +276,7 @@ function Analizar-CarpetasPesadas {
                 Write-Progress -Activity "Analizando espacio en disco" -Status "Escaneando: $($folder.Name)" -PercentComplete $percent
                 
                 $sizeMB = Get-FolderSizeMB $folder.FullName
-                if ($sizeMB -gt 50 -or $currentPath -ne "RAIZ") { 
+                if ($sizeMB -gt 50 -or $currentPath -ne "C:\") { 
                     $folderStats += [PSCustomObject]@{
                         Id = 0
                         Ruta = $folder.FullName
@@ -307,7 +325,9 @@ function Analizar-CarpetasPesadas {
             Write-Host ("-" * 85) -ForegroundColor Cyan
             $rowColorToggle = $true
             foreach ($f in $folderStats) {
-                if ($f.EsCarpeta) {
+                if ($f.Nombre -match "^\[DISCO\]") {
+                    $color = if ($rowColorToggle) { "Green" } else { "DarkGreen" }
+                } elseif ($f.EsCarpeta) {
                     $color = if ($rowColorToggle) { "White" } else { "Gray" }
                 } else {
                     $color = if ($rowColorToggle) { "Cyan" } else { "DarkCyan" }
@@ -319,10 +339,10 @@ function Analizar-CarpetasPesadas {
 
         Write-Host "`nOpciones:" -ForegroundColor Cyan
         if ($folderStats.Count -gt 0) { 
-            Write-Host "  [Numero]   Entrar a una carpeta" 
+            Write-Host "  [Numero]   Entrar a un elemento" 
             Write-Host "  [E Numero] Eliminar un elemento (Ej: E 2)"
         }
-        if ($currentPath -ne "RAIZ") { Write-Host "  [A]        Atras (Subir un nivel)" }
+        if ($currentPath -ne "ESTE EQUIPO") { Write-Host "  [A]        Atras (Subir un nivel)" }
         Write-Host "  [S]        Salir al Menu Principal"
 
         $valid = $false
@@ -332,18 +352,29 @@ function Analizar-CarpetasPesadas {
             
             if ($opcion -match '(?i)^s$') {
                 return
-            } elseif ($opcion -match '(?i)^a$' -and $currentPath -ne "RAIZ") {
-                $parent = Split-Path $currentPath
-                if ($parent -match '(?i)^C:\\(Users)?$') {
-                    $currentPath = "RAIZ"
+            } elseif ($opcion -match '(?i)^a$' -and $currentPath -ne "ESTE EQUIPO") {
+                if ($currentPath -match '^[A-Z]:\\?$') {
+                    $currentPath = "ESTE EQUIPO"
                 } else {
-                    $currentPath = $parent
+                    $parent = Split-Path $currentPath
+                    if ($parent -match '(?i)^C:\\Users$') {
+                        $currentPath = "C:\"
+                    } elseif ($parent -match '^[A-Z]:\\?$') {
+                        $parentLetter = $parent.Substring(0,2)
+                        $currentPath = "$parentLetter\"
+                    } else {
+                        $currentPath = $parent
+                    }
                 }
                 $valid = $true
             } elseif ($opcion -match '(?i)^e\s+(\d+)$') {
                 $id = [int]$matches[1]
                 $match = $folderStats | Where-Object { $_.Id -eq $id }
                 if ($match) {
+                    if ($match.Nombre -match "^\[DISCO\]") {
+                        Write-Host "`n[!] No puedes formatear un disco entero desde aqui." -ForegroundColor Red
+                        continue
+                    }
                     $tipoStr = if ($match.EsCarpeta) { "la CARPETA" } else { "el ARCHIVO" }
                     Write-Host "`nEsta seguro de eliminar permanentemente $tipoStr '$($match.Ruta)'? (S/N): " -NoNewline
                     $conf = [System.Console]::ReadKey($true).KeyChar

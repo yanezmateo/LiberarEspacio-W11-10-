@@ -259,14 +259,16 @@ function Analizar-CarpetasPesadas {
                 $_.Attributes -notmatch "ReparsePoint"
             }
             $files = Get-ChildItem -Path "C:\" -File -Force -ErrorAction SilentlyContinue | Where-Object {
-                $_.Name -notmatch '(?i)^(hiberfil\.sys|pagefile\.sys|swapfile\.sys|dumpstack\.log.*)$'
+                $_.Extension -notmatch '(?i)^\.sys$' -and $_.Name -notmatch '(?i)^dumpstack\.log.*$'
             }
         } else {
             Write-Host "`n[Ubicacion actual: $currentPath]" -ForegroundColor Magenta
             $folders = Get-ChildItem -Path $currentPath -Directory -Force -ErrorAction SilentlyContinue | Where-Object {
                 $_.Attributes -notmatch "ReparsePoint"
             }
-            $files = Get-ChildItem -Path $currentPath -File -Force -ErrorAction SilentlyContinue
+            $files = Get-ChildItem -Path $currentPath -File -Force -ErrorAction SilentlyContinue | Where-Object {
+                $_.Extension -notmatch '(?i)^\.sys$'
+            }
         }
 
         $total = $folders.Count

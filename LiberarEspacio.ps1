@@ -243,7 +243,7 @@ function Analizar-CarpetasPesadas {
                 $folderStats += [PSCustomObject]@{
                     Id = 0
                     Ruta = "$($disco.DeviceID)\"
-                    Nombre = "[DISCO] $($disco.DeviceID)\ $label"
+                    Nombre = "[DISCO] $($disco.DeviceID)\ $label (Espacio Usado)"
                     Tamano = if ($usadoMB -ge 1024) { "$([math]::Round($usadoMB / 1024, 2)) GB" } else { "$([math]::Round($usadoMB, 2)) MB" }
                     TamanoNum = $usadoMB
                     EsCarpeta = $true

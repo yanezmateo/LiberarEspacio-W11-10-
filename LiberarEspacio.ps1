@@ -305,12 +305,15 @@ function Analizar-CarpetasPesadas {
             Write-Host "`n"
             Write-Host ($formatString -f "ID", "Nombre del Elemento", "Tamano") -ForegroundColor Cyan
             Write-Host ("-" * 85) -ForegroundColor Cyan
+            $rowColorToggle = $true
             foreach ($f in $folderStats) {
                 if ($f.EsCarpeta) {
-                    Write-Host ($formatString -f "[$($f.Id)]", $f.Nombre, $f.Tamano) -ForegroundColor White
+                    $color = if ($rowColorToggle) { "White" } else { "Gray" }
                 } else {
-                    Write-Host ($formatString -f "[$($f.Id)]", $f.Nombre, $f.Tamano) -ForegroundColor Gray
+                    $color = if ($rowColorToggle) { "Cyan" } else { "DarkCyan" }
                 }
+                Write-Host ($formatString -f "[$($f.Id)]", $f.Nombre, $f.Tamano) -ForegroundColor $color
+                $rowColorToggle = -not $rowColorToggle
             }
         }
 
@@ -427,14 +430,25 @@ function Vaciar-Papeleras {
 # Bucle del Menu Principal
 while ($true) {
     Clear-Host
-    $espacioLibreBytes = Get-CFreeSpaceBytes
-    $espacioLibreStr = Format-Bytes $espacioLibreBytes
+    $discos = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"
 
     Write-Host "`n=========================================================" -ForegroundColor DarkCyan
-    Write-Host "      MANTENIMIENTO Y LIBERACION DE ESPACIO EN C:\       " -ForegroundColor Cyan
+    Write-Host "         MANTENIMIENTO Y LIBERACION DE ESPACIO           " -ForegroundColor Cyan
     Write-Host "=========================================================" -ForegroundColor DarkCyan
-    Write-Host "   Espacio libre actual -> " -ForegroundColor Gray -NoNewline
-    Write-Host "$espacioLibreStr" -ForegroundColor Green
+    
+    foreach ($disco in $discos) {
+        $espacioLibre = Format-Bytes $disco.FreeSpace
+        $espacioTotal = Format-Bytes $disco.Size
+        $label = if ($disco.DeviceID -eq "C:") { "(Sistema)" } else { "(Datos)  " }
+        Write-Host "   Disco $($disco.DeviceID) $label -> Libre: " -ForegroundColor Gray -NoNewline
+        Write-Host "$espacioLibre" -ForegroundColor Green -NoNewline
+        Write-Host " / Total: $espacioTotal" -ForegroundColor Gray
+    }
+    
+    if ($discos.Count -eq 1) {
+        Write-Host "   (No se detectaron otros volumenes locales)" -ForegroundColor DarkGray
+    }
+    
     Write-Host "=========================================================`n" -ForegroundColor DarkCyan
     
     Write-Host "  [ 1 ] " -ForegroundColor Cyan -NoNewline

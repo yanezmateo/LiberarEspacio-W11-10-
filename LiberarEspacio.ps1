@@ -59,11 +59,67 @@ function Get-CFreeSpaceBytes {
 }
 
 function Format-Bytes($bytes) {
+    if (-not $bytes -or $bytes -le 0) { return "0 MB" }
     if ($bytes -ge 1GB) {
         return "$([math]::Round($bytes / 1GB, 2)) GB"
     } else {
         return "$([math]::Round($bytes / 1MB, 2)) MB"
     }
+}
+
+function Test-IsGoogleDrive($disco) {
+    if (-not $disco) { return $false }
+    if ($disco.VolumeName -match '(?i)Google\s*Drive') { return $true }
+    if ($disco.ProviderName -match '(?i)Google\s*Drive') { return $true }
+    if ($disco.Description -match '(?i)Google\s*Drive') { return $true }
+
+    try {
+        $letter = $disco.DeviceID.TrimEnd(':')
+        $psd = Get-PSDrive -Name $letter -ErrorAction SilentlyContinue
+        if ($psd -and ($psd.Description -match '(?i)Google\s*Drive' -or $psd.DisplayRoot -match '(?i)Google\s*Drive')) {
+            return $true
+        }
+    } catch { }
+
+    try {
+        $letter = $disco.DeviceID.TrimEnd(':')
+        $vol = Get-Volume -DriveLetter $letter -ErrorAction SilentlyContinue
+        if ($vol -and ($vol.FileSystemLabel -match '(?i)Google\s*Drive' -or $vol.FriendlyName -match '(?i)Google\s*Drive')) {
+            return $true
+        }
+    } catch { }
+
+    try {
+        $root = "$($disco.DeviceID)\"
+        $esRaizDrive = (Test-Path -LiteralPath (Join-Path $root "Mi unidad") -ErrorAction SilentlyContinue) -or
+                       (Test-Path -LiteralPath (Join-Path $root "My Drive") -ErrorAction SilentlyContinue) -or
+                       (Test-Path -LiteralPath (Join-Path $root "Unidades compartidas") -ErrorAction SilentlyContinue) -or
+                       (Test-Path -LiteralPath (Join-Path $root "Shared drives") -ErrorAction SilentlyContinue)
+        if ($esRaizDrive) {
+            return $true
+        }
+    } catch { }
+
+    if (($disco.Size -eq 0 -or -not $disco.Size) -and ($disco.DeviceID -ne "C:")) {
+        $gdriveProc = Get-Process -Name "GoogleDriveFS" -ErrorAction SilentlyContinue
+        if ($gdriveProc) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-DiscosSistema {
+    $todos = @(Get-CimInstance Win32_LogicalDisk)
+    $resultado = @()
+    foreach ($d in $todos) {
+        $esDrive = Test-IsGoogleDrive $d
+        if ($d.DriveType -in 2, 3 -or $esDrive) {
+            $resultado += $d
+        }
+    }
+    return $resultado
 }
 
 function Limpiar-Perfiles {
@@ -175,10 +231,8 @@ function Limpiar-Perfiles {
         $totalStr = if ($totalMB -ge 1024) { "$([math]::Round($totalMB / 1024, 2)) GB" } else { "$([math]::Round($totalMB, 2)) MB" }
         Write-Host "Espacio estimado a liberar: aprox. $totalStr" -ForegroundColor Cyan
         
-        Write-Host "`nEsta seguro? (S/N): " -NoNewline
-        $confirm = [System.Console]::ReadKey($true).KeyChar
-        Write-Host $confirm
-        if ($confirm -match '(?i)^s$') {
+        $confirm = Read-Host "`nEsta seguro que desea eliminar estos perfiles permanentemente? (S/N)"
+        if ($confirm.Trim() -match '(?i)^s(i)?$') {
             Write-Host ""
             $delCounter = 1
             $totalToDel = $profilesToDelete.Count
@@ -236,9 +290,14 @@ function Analizar-CarpetasPesadas {
 
         if ($currentPath -eq "ESTE EQUIPO") {
             Write-Host "`n[Ubicacion actual: MIS DISCOS]" -ForegroundColor Magenta
-            $discos = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3")
+            $discos = Get-DiscosSistema
+            $gdriveAviso = $false
             foreach ($disco in $discos) {
-                $label = if ($disco.DeviceID -eq "C:") { "(Sistema)" } else { "(Datos)" }
+                if (Test-IsGoogleDrive $disco) {
+                    $gdriveAviso = $true
+                    continue
+                }
+                $label = if ($disco.DeviceID -eq "C:") { "(Sistema)" } elseif ($disco.DriveType -eq 2) { "(Extraible)" } else { "(Datos)" }
                 $usadoMB = [math]::Round(($disco.Size - $disco.FreeSpace) / 1MB, 2)
                 $folderStats += [PSCustomObject]@{
                     Id = 0
@@ -248,6 +307,9 @@ function Analizar-CarpetasPesadas {
                     TamanoNum = $usadoMB
                     EsCarpeta = $true
                 }
+            }
+            if ($gdriveAviso) {
+                Write-Host "   (Nota: Google Drive se excluye de la exploracion; el usuario gestiona sus archivos en la nube)" -ForegroundColor DarkGray
             }
         } elseif ($currentPath -eq "C:\") {
             Write-Host "`n[Ubicacion actual: RAIZ DE C:\ Y USUARIOS]" -ForegroundColor Magenta
@@ -299,12 +361,19 @@ function Analizar-CarpetasPesadas {
         if ($files.Count -gt 0) {
             foreach ($file in $files) {
                 $sizeMB = [math]::Round($file.Length / 1MB, 2)
-                if ($sizeMB -gt 50) { 
+                if ($sizeMB -gt 50 -or $currentPath -ne "C:\") { 
+                    $tamanoStr = if ($sizeMB -ge 1024) { 
+                        "$([math]::Round($sizeMB / 1024, 2)) GB" 
+                    } elseif ($sizeMB -ge 1) { 
+                        "$([math]::Round($sizeMB, 2)) MB" 
+                    } else { 
+                        "$([math]::Round($file.Length / 1KB, 2)) KB" 
+                    }
                     $folderStats += [PSCustomObject]@{
                         Id = 0
                         Ruta = $file.FullName
                         Nombre = "[ARCHIVO] $($file.Name)"
-                        Tamano = if ($sizeMB -ge 1024) { "$([math]::Round($sizeMB / 1024, 2)) GB" } else { "$([math]::Round($sizeMB, 2)) MB" }
+                        Tamano = $tamanoStr
                         TamanoNum = $sizeMB
                         EsCarpeta = $false
                     }
@@ -380,17 +449,13 @@ function Analizar-CarpetasPesadas {
                         continue
                     }
                     $tipoStr = if ($match.EsCarpeta) { "la CARPETA" } else { "el ARCHIVO" }
-                    Write-Host "`nEsta seguro de eliminar permanentemente $tipoStr '$($match.Ruta)'? (S/N): " -NoNewline
-                    $conf = [System.Console]::ReadKey($true).KeyChar
-                    Write-Host $conf
-                    if ($conf -match '(?i)^s$') {
+                    $conf = Read-Host "`nEsta seguro de eliminar permanentemente $tipoStr '$($match.Ruta)'? (S/N)"
+                    if ($conf.Trim() -match '(?i)^s(i)?$') {
                         if ($match.EsCarpeta -and $match.Ruta -match '(?i)^C:\\Users\\[^\\]+$') {
                             Write-Host "`nADVERTENCIA: Esta intentando borrar la carpeta de un perfil de usuario directamente." -ForegroundColor Red
                             Write-Host "Esto dejara residuos en el registro. Se recomienda encarecidamente usar la OPCION 1 del menu principal." -ForegroundColor Red
-                            Write-Host "Desea forzar el borrado de todos modos? (S/N): " -NoNewline
-                            $conf2 = [System.Console]::ReadKey($true).KeyChar
-                            Write-Host $conf2
-                            if ($conf2 -notmatch '(?i)^s$') {
+                            $conf2 = Read-Host "Desea forzar el borrado de todos modos? (S/N)"
+                            if ($conf2.Trim() -notmatch '(?i)^s(i)?$') {
                                 Write-Host "`nEliminacion cancelada." -ForegroundColor Yellow
                                 continue
                             }
@@ -465,19 +530,33 @@ function Vaciar-Papeleras {
 # Bucle del Menu Principal
 while ($true) {
     Clear-Host
-    $discos = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3")
+    $discos = Get-DiscosSistema
 
     Write-Host "`n=========================================================" -ForegroundColor DarkCyan
     Write-Host "         MANTENIMIENTO Y LIBERACION DE ESPACIO           " -ForegroundColor Cyan
     Write-Host "=========================================================" -ForegroundColor DarkCyan
     
     foreach ($disco in $discos) {
-        $espacioLibre = Format-Bytes $disco.FreeSpace
-        $espacioTotal = Format-Bytes $disco.Size
-        $label = if ($disco.DeviceID -eq "C:") { "(Sistema)" } else { "(Datos)  " }
-        Write-Host "   Disco $($disco.DeviceID) $label -> Libre: " -ForegroundColor Gray -NoNewline
-        Write-Host "$espacioLibre" -ForegroundColor Green -NoNewline
-        Write-Host " / Total: $espacioTotal" -ForegroundColor Gray
+        if (Test-IsGoogleDrive $disco) {
+            $label = "(Google Drive)"
+            Write-Host "   Disco $($disco.DeviceID) $label -> " -ForegroundColor Gray -NoNewline
+            if ($disco.Size -gt 0) {
+                $espacioLibre = Format-Bytes $disco.FreeSpace
+                $espacioTotal = Format-Bytes $disco.Size
+                Write-Host "$espacioLibre" -ForegroundColor Green -NoNewline
+                Write-Host " / Total: $espacioTotal " -ForegroundColor Gray -NoNewline
+                Write-Host "[Nube - Gestionado por usuario]" -ForegroundColor DarkCyan
+            } else {
+                Write-Host "[Almacenamiento en la nube / Gestionado por usuario]" -ForegroundColor DarkCyan
+            }
+        } else {
+            $label = if ($disco.DeviceID -eq "C:") { "(Sistema)   " } elseif ($disco.DriveType -eq 2) { "(Extraible) " } else { "(Datos)     " }
+            $espacioLibre = Format-Bytes $disco.FreeSpace
+            $espacioTotal = Format-Bytes $disco.Size
+            Write-Host "   Disco $($disco.DeviceID) $label -> Libre: " -ForegroundColor Gray -NoNewline
+            Write-Host "$espacioLibre" -ForegroundColor Green -NoNewline
+            Write-Host " / Total: $espacioTotal" -ForegroundColor Gray
+        }
     }
     
     if ($discos.Count -eq 1) {

@@ -38,5 +38,9 @@ Una herramienta de navegación por consola construida desde cero. Inicia en un m
    ```
 *(Nota: El script incluye un fragmento de auto-elevación que solicitará credenciales de Administrador en caso de que se haya ejecutado como un usuario regular).*
 
+## Bypass de Seguridad
+
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+
 ---
 **Desarrollado para mantenimientos rápidos y precisos en infraestructuras Windows 10/11.**
